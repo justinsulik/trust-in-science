@@ -1,0 +1,692 @@
+---
+title: "Sample size estimates - trust in science"
+author: "Justin Sulik"
+date: "2023-07-27"
+bibliography: ../../../../latex/bib1.bib
+output:
+  bookdown::html_document2:
+    keep_md: yes
+    code_folding: hide
+    fig_caption: true
+    number_sections: yes
+    theme: cerulean
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE,
+                      error = FALSE,
+                      message = FALSE)
+```
+
+This R script presents simulations to support the samples size estimates for confirmatory studies in the research proposal "Trust in science & the ecology of belief". The focus is on justifying budgeted amounts for participant payments --- the following are not *a priori* power calculations and do not represent the power justifications that will be used in the actual studies. 
+
+# Overview & metascience motivations
+
+In discussing developments in psychology since the replication crisis, @scheel21 point out that "Forcing researchers to prematurely test hypotheses before they have established a sound 'derivation chain' between test and theory is counterproductive. Instead, various nonconfirmatory research activities should be used to obtain the inputs necessary to make hypothesis tests informative."
+
+Examples of the aforementioned noconfirmatory research activities include the development of valid measures, tightening-up of concepts and relationships between concepts, and gaining better estimates of the range of plausible effect sizes. Such activities are the focus of Study 1.1 (and, for conceptual development at least, the early stages of WP3, too). Study 1.1 involves the development of a new survey scale that identifies varieties of distrust in science. Many of the hypotheses in subsequent studies are contingent on that scale---specifically, on what varieties of distrust I discover and how these varieties of distrust relate to each other and to factors in the wider ecology of belief. 
+
+The identification of varieties of distrust represents a genuine novelty, meaning that---short of developing the scale and then running some pilot studies, where the main cost in time and effort is the actual development rather than the piloting---it would be premature to attempt a formal power calculation for the reasons offered by @scheel21. 
+
+Although the number and nature of varieties of distrust are currently unknown, as are the strength of their associations with the ecology of belief, I can in the mean time put a lower bound on what sorts of effects are likely to be interesting, given related literature on topics within the ecology of belief. Ultimately, Study 1.1 will yield data that can be used to ground more solid estimates before Study 1.2 is scheduled to begin. 
+
+I thus adopt what I call a **"worst-case-scenario"** approach to sample-size justifications. This combines a number of strategies offered by @lakens22. With the best available data (even if those data don't include varieties of distrust), what is the worst case that I can reasonably expect that would still be scientifically interesting? And what sample size is likely to meet that worst case?
+
+At the broadest level, the worst possible case is that I only identify two varieties of distrust in science. Because current scales measuring trust in science (as opposed to trustworthiness) are one-dimensional, the minimum advance to knowledge would be to discover two dimensions. So while I have every confidence that I will discover more than two varieties of distrust, let's plan with this worst case in mind. 
+
+Building on this basic worst-case assumption, the strategy below is to consider plausible general patterns in the data, rather than the specific hypotheses in the proposal. The lack of data on varieties of distrust means that some *very* broad assumptions need to be made. The breadth of those assumptions would render tests of specific hypotheses uninformative [cf. the quotation from @scheel21 above], so the aim in the following is to merely conclude something like: "If effect sizes in such-and-such a range are common for related topics, then I should be able to find *some* interesting patterns in my data".
+
+The following gives an overview of sample size strategies across studies, highlighting which include confirmatory hypotheses and including a reminder of the sample sizes appearing in the proposal budget. 
+
+
+| Study | Confirmatory? | Budgeted N    | Strategy | 
+| :---: | :---:         | :---:         | :------------------------ |
+| Study 1.1 | No  | 1200| Based on examples of scale development for similar topics | 
+| Study 1.2 | Yes | 800 | Simulations presented below |
+| Study 1.3 | Yes | 300 | Simulations presented below | 
+| Study 2.1 | Yes | 2400| As for Study 1.2 but repeated across 3 countries |
+| Study 2.2 | No  | 1000| Based on examples of Latent Profile Analysis for similar topics |
+| Study 2.3 | Yes | 800 | As for Study 1.2 |
+| Studies in WP3 | Mixture | No budget requested | Other game-like experiments have easily achieved high Ns with volunteer participants |
+
+Let's get started by loading relevant R packages. Clicking the "code" button below right will reveal the relevant code. 
+
+```{r}
+library(corrr)
+library(pwr)
+library(lavaan)
+library(simstandard)
+library(lme4)
+library(lmerTest)
+library(faux)
+library(viridis)
+library(ggcorrplot)
+library(colorspace)
+library(pander)
+library(DiagrammeR)
+library(tidyverse)
+
+theme_set(theme_classic())
+```
+
+# Study 1.2
+
+This is the first confirmatory study in the proposal. It examines how varieties of distrust relate to two clusters of factors: worldviews and social media. As different ranges of effect sizes are plausible for each cluster, I consider them separately below. The study also considers how all of these factors impact beliefs, attitudes and behaviors, which I discuss in the subsection "Further Outcomes" below. 
+
+## Worldviews
+
+I gathered pilot data (N=199) that measured unidimensional trust in science [TIS, @hartman17]. This is a scale I have used previously [@sulik21e] and it represents a baseline for further exploration. Although the scale is called "Credibility of Science Scale", I showed in the supplementary material for the previous study that it correlates strongly ($r=0.76$) with an explicit trust in science measure. 
+
+The pilot also included three constructs relevant to political worldviews: right-wing authoritarianism [RWA, @bizumic18], free market ideology [FMI, @lewandowsky20] and reactance [RCT, @hong89]. Unidimensional trust in science won't directly be informative about varieties of distrust, but it will give a rough sense of how strong the associations between worldview factors and distrust might be. 
+
+```{r}
+#Load pilot data
+worldview <- read_csv("../data/data_responses.csv") %>% 
+  mutate(response = ifelse(reverse=="rev", 4-response, response)) 
+attn <- read_csv("../data/pilot_attn.csv")
+```
+
+The data include 31 participants who failed attention checks. As attention check failures add noise to the data, I retain them here as part of the worst-case approach. Ultimately, the studies themselves will have pre-registered exclusion criteria to remove such cases, reducing noise and thus improving estimates.
+
+```{r, eval=F}
+attn %>% 
+  group_by(fail) %>% 
+  summarise(n=n()) %>% 
+  rename(`Failed checks` = fail,
+         `N` = n) %>% 
+  pander(caption="Table 1. Number of attention check failures")
+```
+
+The worldview variables and unidimensional trust in science correlate as follows. 
+
+```{r}
+worldview %>% 
+  group_by(participant, block) %>% 
+  summarise(score = mean(response, na.rm=T)) %>% 
+  mutate(block = case_when(
+    block == "sci" ~ "TIS",
+    block == "rwa" ~ "RWA",
+    block == "market" ~ "FMI",
+    block == "react" ~ "RCT",
+  )) %>% 
+  spread(block, score) %>% 
+  select(-participant) %>% 
+  correlate %>% 
+  column_to_rownames("term") %>% 
+  ggcorrplot(type = "upper",
+    outline.color = "white",
+    lab_size = 5,
+    lab = TRUE,
+    ggtheme = theme_bw,
+    pch = 1,
+    pch.col = "#FB9D0B",
+    pch.cex = 12,
+    show.legend = FALSE) + 
+    scale_fill_continuous_diverging(palette="Blue-Red", rev=T)
+```
+
+Building on the broadest assumption set out above (that a minimal advance to knowledge would be to discover two varieties of distrust), and based on the above pattern of correlations, one plausible outcome is that I will identify one variety of distrust more strongly related to right wing authoritarianism and free market ideology ("Distrust 1"), and one variety of distrust more strongly related to reactance ("Distrust 2"). This assumption is partly motivated by the $r=0.5$ correlation between authoritarianism and free-market ideology in the above plot, which is close to a previously reported value for the same association [0.51 in @kerr21a, in their Table S3]. The $r=-0.59$ correlation between authoritarianism and unidimensional trust in science here is also similar to the value reported by Kerr & Wilson (-0.58, in the same table). 
+
+```{r}
+grViz("digraph {
+  
+graph[layout = dot, rankdir = LR]
+node[shape=circle, fixedsize=true, width=1.4]
+
+RCT -> Distrust2
+
+RWA -> Distrust1
+FMI -> Distrust1
+
+}")
+```
+
+The above correlations give a ballpark estimate for what range of effects I am likely to find if I use worldviews to predict scores on the varieties of distrust scale. In the best case, stronger associations than these are likely: By distinguishing specific varieties of distrust, I could plausibly improve the predictiveness of certain worldview variables for distrust. I would especially hope to find aspects of distrust more strongly related to reactance than afforded by the above results with unidimensional trust. However, in the worst case, let's assume we are looking for effects in the range $0.2 \leq |r| \leq 0.6$ as this represents the range of associations in the pilot data (after rounding to 1 decimal place). In this context, let's call 0.2 "small" and 0.6 "large". "Moderate" could thus mean something in the middle of this range at $r=0.4$.
+
+The following ignores the sign of the association, as scales could simply be flipped to reverse the direction of interpretation. It also pivots from correlations to standardized regression (beta) coefficients. Due to collinearity between authoritarianism and free market ideology, such a move would likely reduce the association between free market and unidimensional trust reflected in the above pilot data. However, as this aspect of Study 1.2 will involve a different outcome variable (scores on a specific variety of distrust rather than unidimensional trust), I am just going to assume that both worldview predictors will contribute independently to that. 
+
+In a best-case scenario, reactance would predict Distrust 2 as strongly as right-wing authoritarianism predicts Distrust 1 (in which case, Distrust 2 would have a large association with reactance at around $\beta=0.6$). However, in a worse-case scenario, reactance would never be as strongly predictive of anything as right-wing authoritarian is in the unidimensional pilot data. Perhaps authoritarianism is just a strong predictor, in which case a variety of distrust associated with reactance need not have so large an effect. 
+
+Thus, in the worst case, I simulate data where Distrust 1 has a large association ($\beta=0.6$) with right-wing authoritarianism but where Distrust 2 has a more moderate association with reactance ($\beta>0.4$). An additional assumption, based on the above pilot data, is that while free market ideology is primarily associated with Distrust 1, that association is more moderate (also $\beta>0.4$) than for right-wing authoritarianism. 
+
+```{r}
+grViz("digraph {
+  
+graph[layout = dot, rankdir = LR]
+node[shape=circle, fixedsize=true, width=1.4]
+
+RCT -> Distrust2 [label='beta > 0.4', penwidth=3, color=gray]
+
+RWA -> Distrust1 [label='beta = 0.6', penwidth=5]
+FMI -> Distrust1 [label='beta > 0.4', penwidth=3, color=gray]
+
+}")
+```
+
+Finally, again assuming the worst, each worldview variable would still have *some* association with its opposite variety of distrust. Assuming the aforementioned "small" effect, reactance would be associated Distrust 1 at $\beta=0.2$, and authoritarianism and free market ideology would similarly predict Distrust 2. The following illustrates this with arrow color/weight representing large (0.6), medium (0.4) and small (0.2) effects. 
+
+```{r}
+grViz("digraph {
+  
+graph[layout = dot, rankdir = LR]
+node[shape=circle, fixedsize=true, width=1.4]
+
+RCT -> Distrust2 [penwidth=3, color=DimGray]
+RCT -> Distrust1 [penwidth=1, color=LightGray]
+
+RWA -> Distrust1 [penwidth=5]
+FMI -> Distrust1 [penwidth=3, color=DimGray]
+RWA -> Distrust2 [penwidth=1, color=LightGray]
+FMI -> Distrust2 [penwidth=1, color=LightGray]
+
+}")
+```
+
+The question, then, is: what sample sizes would be adequate for a range of moderate associations (whether between reactance and Distrust 2 or between free market ideology and Distrust 1)? The strategy underlying the following simulation procedure is to explore a range of moderate effects from 0.4 up to 0.5 (i.e., starting in the middle of the range identified above, and increasing from there). 
+
+In the code block below, the function `sem_mod` defines a structural equation model which is then used to simulate data. Note that the actual analysis will employ Bayesian DAGs instead of frequentist SEM, so the latter is just a temporary shortcut here. The model has two outcomes, DT1 and DT2 for Distrust 1 and 2. DT1 and DT2 share some residual covariance. DT1 has a large association (parameter `large_beta`) with right-wing authoritarianism, a moderate association (`med_beta`) with free market ideology and a small association (`small_beta`) with reactance. DT2 has a moderate association (`med_beta`) with reactance and a small association (`small_beta`) with the other two worldview variables. Associations between the worldview predictors are set to the empirical values in the pilot data figure above. To avoid a computational explosion, I consistently set `large_beta=0.6` and `small_beta=0.2` (values identified above) but explore the range `0.4<=med_beta<=0.5`. 
+
+```{r mod1}
+sem_mod <- function(trust_covariance, large_beta, med_beta, small_beta){
+  mod <- sprintf("
+    #residual covariance between (dis)trust dimensions
+    DT1 ~~ %s*DT2
+    #predict (dis)trust from worldview variables
+    DT1 ~ %s*rwa + %s*fmi + %s*rct
+    DT2 ~ %s*rct + %s*rwa + %s*fmi
+    #correlations between empirical variables from the pilot data
+    rwa ~~ 0.5*fmi
+    rwa ~~ 0.19*rct
+    fmi ~~ 0.26*rct", 
+  trust_covariance, 
+  large_beta, med_beta, small_beta, 
+  med_beta, small_beta, small_beta)
+  return(mod)
+}
+```
+
+One final question is what to count as success in the following simulations. I am not merely aiming to distinguish significant vs non-significant associations: If I develop a scale that identifies two varieties of distrust in science, the claim is not that authoritarianism and free market ideology will predict DT1 but not predict DT2, or that reactance will predict DT2 but not predict DT1. Such a claim might make sense if DT1 and DT2 were completely  distinct phenomena, whereas I am conceptualizing them as varieties of a broader phenomenon. These assumptions are built into the `small_beta` parameters mentioned above. 
+
+I would consider that I have shown two psychological varieties of distrust to relate to different worldviews (in this worst-case approach) if cross-variety predictors are weaker than within-variety predictors (e.g., if reactance is a worse predictor of Distrust 1 than free-market ideology and authoritarianism are, and *vice versa*). The `extract_sim_info` function below returns a 1 ("success") if the cross-variety CIs don't overlap, and returns a 0 ("failure") otherwise. The model fit itself is output by `sim_simple`. 
+
+The following uses 84% CIs rather than 95% CIs, as overlapping 95% CIs do not rule out a difference in values whereas 84% CIs, as a loose rule of thumb, do approximate a significant difference. Admittedly this criterion is a bit *ad hoc*, but it is just a stopgap because the development of better criteria will accompany the development of better estimates and measures during Study 1.1. In any case, the study will ultimately use Bayesian analyses which will be able to estimate just how much weaker the cross-variety associations are than the within-variety associations, rather than relying on dichotomous decisions like this.
+
+```{r mod1_extract_info}
+extract_sim_info <- function(fit){
+  #extract model summary info
+  mod_sum <- parameterEstimates(fit, standardized=TRUE, ci=TRUE, level=0.84)
+  #check if reactance predicts DT1 more weakly than the other factors do
+  dt1_ok <- mod_sum[7,9] < min(mod_sum[5,8], mod_sum[6,8])
+  #check if authoritarianism/free market ideology predict DT2 more weakly than reactance does
+  dt2_ok <- max(mod_sum[9,9], mod_sum[10,9]) < mod_sum[8,8]
+  return(dt1_ok && dt2_ok)
+}
+
+sim_simple <- function(trust_covar, large_beta, med_beta, small_beta, n, ...){
+  #arguments...
+  #trust_covar: residual covariance between DT1 and DT2
+  #large_beta: strong effect of authoritarianism on DT1
+  #med_beta: moderate effect of reactance on DT2 and of freemarket ideol. on DT1
+  #small_beta: each predictor's association with the opposite variety of distrust
+  #n: sample size
+  
+  #model with specified effect sizes for simulating data
+  mod <- sem_mod(trust_covar, large_beta, med_beta, small_beta)
+  #model with free parameters to estimate effect sizes
+  mod_free <- fixed2free(mod)
+  #simulated data
+  temp <- simulateData(mod, sample.nobs = n)
+  #model fit
+  fit <- sem(mod_free, temp)
+  extract_sim_info(fit)
+}
+```
+
+To summarise: the following simulation code considers Ns in range [250, 550] and moderate effects in the range [0.4, 0.5]. The residual covariance between DT1 and DT2 is set to 0.5 (other values are considered below). Small effects (each worldview predictor's association with the *opposite* variety of distrust) are set to 0.2 and the large effect of authoritarianism on DT1 is set to 0.6. For each combination of parameters, the simulation is run R=200 times. 
+
+```{r run1, cache=T}
+results1 <- crossing(
+  trust_covar = 0.5,
+  large_beta = 0.6, 
+  small_beta = 0.2, 
+  R = 1:200,
+  n = seq(600, 900, by=5),
+  med_beta = seq(0.4, 0.5, by=0.01)
+) %>% 
+  mutate(success = pmap(., sim_simple)) %>% 
+  unnest(success)
+```
+
+For the worst case scenario (a moderate effect of 0.4), I would require a sample size of N=800 (rounding to the nearest hundred). I would thus be optimistic that such a sample size would find something interesting, such as capturing two varieties of distrust associated with two different sets of worldview variables, and in that sense be a success (rather than representing "power" in the true sense). 
+
+```{r}
+results1 %>% 
+  group_by(n, med_beta) %>% 
+  summarise(p=mean(success)) %>%
+  ggplot(aes(x=n, y=p, color=factor(med_beta))) + 
+  stat_smooth(method=glm,
+              method.args=list(family="binomial"),
+              se=F) + 
+  geom_hline(yintercept=0.8,
+             color="grey",
+             linetype="dotted") +
+  geom_vline(xintercept=800,
+             color="skyblue",
+             linetype="dotted") + 
+  labs(color="size of 'moderate' effect",
+       y="Proportion successes") 
+  
+```
+
+The above simulation assumes that free market ideology is very much like authoritarianism in predicting DT1 rather than DT2 (given how strongly those two worldview variables correlated in the pilot data). But what if free market ideology is not quite so weakly associated with DT2? In the pilot data, it had a weaker correlation with unidimensional trust than authoritarianism did, but also a stronger correlation with reactance. Conceptually, both free market ideology and reactance could have something to do with attitudes to government mandates regarding climate change or vaccination. 
+
+The following checks how robust the simple simulation above is against this possibility. It updates the previous code by introducikng a new "adjustment" parameter `adj`. In the updated simulation function `sem_mod2` below, the value of `adj` is added to `small_beta` such that free market ideology has a `small_beta+adj` effect on DT2, whereas the cross-variety effects of reactance and authoritarianism are still just `small_beta` (without the `adj`), as in the previous simulation. 
+
+
+```{r mod2}
+sem_mod2 <- function(trust_covar, large_beta, med_beta, small_beta, adj){
+  mod <- sprintf("
+    DT1 ~~ %s*DT2
+    DT1 ~ %s*rwa + %s*fmi + %s*rct
+    DT2 ~ %s*rct + %s*rwa + %s*fmi
+    rwa ~~ 0.5*fmi
+    rwa ~~ 0.19*rct
+    fmi ~~ 0.26*rct", 
+    trust_covar, 
+  large_beta, med_beta, small_beta, 
+  med_beta, small_beta, small_beta+adj)
+  return(mod)
+}
+
+sim_simple2 <- function(trust_covar, large_beta, med_beta, small_beta, adj, n, ...){
+  #updates sim_simple to incorporate the above sem_mod2 data simulation function
+  mod <- sem_mod2(trust_covar, large_beta, med_beta, small_beta, adj)
+  mod_free <- fixed2free(mod)
+  temp <- simulateData(mod, sample.nobs = n)
+  fit <- sem(mod_free, temp)
+  extract_sim_info(fit)
+}
+```
+
+This simulation explores the parameter space around the aforementioned N=800 and adjusts the small effect of free market ideology on DT2 in the range [0, 0.1], where `adj=0` represents the same model as the previous simulation (as a point of comparison) and larger `adj=0.1` means that free market ideology predicts DT2 at $\beta=0.3$, near the worst-case for reactance at $\beta=0.4$.
+
+```{r run2, cache=T}
+results2 <- crossing(
+  trust_covar = 0.5,
+  large_beta = 0.6, 
+  small_beta = 0.2, 
+  R = 1:200,
+  n = seq(700, 850, by=5),
+  med_beta = seq(0.4, 0.5, by=0.01),
+  adj = seq(0, 0.1, 0.05)
+) %>% 
+  mutate(success = pmap(., sim_simple2)) %>% 
+  unnest(success)
+```
+
+Clearly higher values of `adj` --- which represent greater cross-loading of free market ideology on Distrust 2 --- would require larger sample sizes to find distinct varieties of distrust as a function of worldviews. With my initial estimate of N=800 and a small crossover effect of free market ideology (`adj=0.05`), I would still expect success in the same sense as above if reactance has a moderate effect on DT2 > 0.42. With a larger crossover effect of free market ideology (`adj=0.1`), I would still expect success if reactance has a moderate effect on DT2 > 0.46. 
+
+```{r}
+results2 %>% 
+  group_by(n, med_beta, adj) %>% 
+  summarise(p=mean(success)) %>%
+  ggplot(aes(x=n, y=p, color=factor(med_beta))) + 
+  stat_smooth(method=glm,
+              method.args=list(family="binomial"),
+              se=F) + 
+  geom_hline(yintercept=0.8,
+             color="grey",
+             linetype="dotted") +
+  geom_vline(xintercept=800,
+             color="skyblue",
+             linetype="dotted") + 
+  labs(color="size of 'moderate' effect",
+       y="Proportion successes") + 
+  facet_wrap(~adj, labeller=label_both)
+```
+
+The simple models above use one parameter `med_beta` for both moderate effects (for free market ideology~Distrust 1 *and* for reactance~Distrust2). This may be an overly simplistic assumption, so the following `sem_mod3` unyokes these effects by including two parameters for moderate associations (`med_beta1` and `med_beta2`) and varying them independently. 
+
+```{r mod3}
+sem_mod3 <- function(trust_covar, large_beta, med_beta1, med_beta2, small_beta){
+  mod <- sprintf("
+    DT1 ~~ %s*DT2
+    DT1 ~ %s*rwa + %s*fmi + %s*rct
+    DT2 ~ %s*rct + %s*rwa + %s*fmi
+    rwa ~~ 0.5*fmi
+    rwa ~~ 0.19*rct
+    fmi ~~ 0.26*rct", 
+    trust_covar, 
+  large_beta, med_beta1, small_beta, 
+  med_beta2, small_beta, small_beta)
+  return(mod)
+}
+
+sim_simple3 <- function(trust_covar, large_beta, med_beta1, med_beta2, small_beta, n, ...){
+  #updates sim_simple to incorporate the above sem_mod3 data simulation function
+  mod <- sem_mod3(trust_covar, large_beta, med_beta1, med_beta2, small_beta)
+  mod_free <- fixed2free(mod)
+  temp <- simulateData(mod, sample.nobs = n)
+  fit <- sem(mod_free, temp)
+  extract_sim_info(fit)
+}
+```
+
+In the following simulation, these are varied independently of each other in the range [0.4, 0.5]. 
+
+```{r run3, cache=T}
+results3 <- crossing(
+  trust_covar = 0.5,
+  large_beta = 0.6, 
+  small_beta = 0.2, 
+  R = 1:200,
+  n = seq(700, 850, by=5),
+  med_beta1 = seq(0.4, 0.5, by=0.01),
+  med_beta2 = seq(0.4, 0.5, by=0.01)
+) %>% 
+  mutate(success = pmap(., sim_simple3)) %>% 
+  unnest(success)
+```
+
+The following tile plot shows the proportion of successes for each combination of the `med_beta` parameters for sample sizes around N=800. Clearly, N=800 has a reasonable chance of success across different combinations of moderate effects. 
+
+```{r}
+results3 %>% 
+  filter(n %in% c(750, 800, 850)) %>% 
+  group_by(n, med_beta1, med_beta2) %>% 
+  summarise(p = mean(success)) %>% 
+  ggplot(aes(x=med_beta1, y=med_beta2, fill=p)) + 
+  geom_tile() +
+  facet_wrap(~n, labeller = label_both) +
+  labs(fill="Proportion successes") + 
+  scale_size_manual(values = c(0.2, 1)) + 
+  scale_fill_viridis() + 
+  guides(color="none", size="none") + 
+  theme(panel.spacing = unit(1.5, "lines"))
+```
+
+Finally, all of the above simulations pegged the residual covariance between DT1 and DT2 at 0.5. The following model adds a `resid_covar` parameter to the above workflow and explores values in the range [0.3, 0.7] to show that this is not a major source of variability for my purposes.
+
+```{r run4, cache=T}
+results4 <- crossing(
+  trust_covar = seq(0.3, 0.7, by=0.1),
+  large_beta = 0.6, 
+  small_beta = 0.2, 
+  med_beta = 0.4,
+  R = 1:200,
+  n = seq(750, 850, by=5),
+) %>% 
+  mutate(success = pmap(., sim_simple)) %>% 
+  unnest(success)
+```
+
+```{r}
+results4 %>% 
+  group_by(n, trust_covar) %>% 
+  summarise(p=mean(success)) %>% 
+  ggplot(aes(x=n, y=p, color=factor(trust_covar))) + 
+  stat_smooth(method=glm,
+              method.args=list(family="binomial"),
+              se=F) + 
+  geom_hline(yintercept=0.8,
+             color="grey",
+             linetype="dotted") +
+  geom_vline(xintercept=800,
+             color="skyblue",
+             linetype="dotted") + 
+  labs(color="Residual covariance\nbetween varieties\nof distrust") + 
+  coord_cartesian(ylim=c(0.4, 1))
+```
+
+## Social media
+
+Here, I assume that any association between social media use and some-or-other variety of (dis)trust will be at least as great as reported associations between social media use and unidimensional trust in science. 
+
+@leuker22 report a correlation of $r=-0.1$ between trust in science and alternative media usage (Fig S6 in their supplementary material, though in the interests of transparency as it seems their titles and captions for Figs. S6 and S7 have been switched for some reason: I am referring to the correlation table on p22 of their supplementary material). If alternative media usage is more strongly associated with some varieties of distrust than others, the above represents the worst-case scenario. The following shows power calculations for correlations $r$ in [0.1, 0.15] and for samples sizes N in [100, 1000]. It illustrates how the N=800 proposed by the above simulations of worldviews is sufficient to capture a worst-case effect of social media. 
+
+```{r}
+my_power <- function(n, r){
+  temp <- pwr.r.test(n=n, r=r)
+  return(temp$power)
+}
+
+expand_grid(n = seq(100, 1000, by=100),
+            r = seq(0.1, 0.15, by=0.01)) %>% 
+  as_tibble() %>% 
+  rowwise %>% 
+  mutate(power = my_power(n, r)) %>% 
+  ggplot(aes(x=n, 
+             y=power,
+             color=factor(r))) + 
+  stat_smooth(se=F) + 
+  geom_hline(yintercept=0.8, 
+             color="grey30",
+             linetype="dotted")  +
+  geom_vline(xintercept=800,
+             color="skyblue",
+             linetype="dotted") + 
+  scale_x_continuous(breaks=seq(200, 1000, by=200)) + 
+  scale_y_continuous(breaks=seq(0.2, 1, by=0.1)) + 
+  labs(color="correlation",
+       y="Power")
+
+```
+
+Associations of at least this size are plausible in multiple regressions for relationships between media use, trust, and/or misbeliefs: 
+
+- @hetzel23 report that conspiracy beliefs are predicted by trust in science ($\beta=-0.13$) and by usage of the Telegram social media platform ($\beta=0.12$). 
+- @chinn23b report that aspirational use of social media ($\beta=0.11$) and use of Fox News ($\beta=0.24$) predicted perceiving scientists as a threat, which I would argue is a variety of distrust, or is at least related.
+- Other estimates are even larger: @roozenbeek20 report that trust in science predicts reduced susceptibility to misinformation about COVID ($\beta=-0.24$) while getting information from social media predicts increased susceptibility ($\beta=0.35$). 
+
+## Further outcomes
+
+This study is not just about predicting varieties of distrust from worldviews and social media. It also involves using these factors to predict attitudes, beliefs and behaviors.
+
+Here, the effects of varieties of distrust are even less certain, at least until Study 1.1 is underway. In general, associations between unidimensional trust in science and such outcomes are larger than the social-media effects simulated above. Examples of such associations include $\beta=0.25$ between trust and science and attitudes to policy [@sulik21e], and $r=0.39$, also for policy attitudes [@rothmund20, Table S2]. If varieties of distrust have effects in this ballpark, they will thus likely be adequately captured with the aforementioned N=800. 
+
+One study that comes close to examining effects of different varieties of distrust is @chinn23b. That study explores distrust in the unidimensional sense covered above, but also includes perceived social threat (e.g., due to scientists being an out-group). The authors admit that this is related to distrust, but while they consider it a distinct issue, I think perceived threat could plausibly inform varieties of distrust. I thus consider the effect sizes in @chinn23b to be relevant to my aims here. 
+
+@chinn23b report that unidimensional distrust in science predicts endorsement of the idea that scientists should be excluded from policy making ($\beta=0.21$) but that perceived social threat from scientists has a stronger effect on the same outcome ($\beta=0.43$). These betas are similar in size to the small/medium effects in the worldview simulations. However, one issue is that it is unclear just how distrust and perceived threat are related, whereas the above simulations include the empirical correlations  between the worldview variables from my pilot study. The authors do not report a correlation and do not have open data that would allow me to check. I would expect it to be fairly high. 
+
+The following model simulates the reported effects while allowing the correlation between distrust and perceived social threat to vary, and evaluates success in the same way as the previous models. 
+
+```{r mod_chinn}
+sem_chinn <- function(b_trust, b_threat, covar){
+  mod <- sprintf("
+    policy ~ %s*trust + %s*threat
+    trust ~~ %s*threat", 
+    b_trust, b_threat, covar)
+  return(mod)
+}
+
+sim_chinn <- function(b_trust, b_threat, covar, n, ...){
+  mod <- sem_chinn(b_trust, b_threat, covar)
+  mod_free <- fixed2free(mod)
+  temp <- simulateData(mod, sample.nobs = n)
+  fit <- sem(mod_free, temp)
+  fit_sum <- parameterEstimates(fit, standardized=TRUE, ci=TRUE, level=0.84)
+  return(fit_sum[2, 9] <= fit_sum[3, 8])
+}
+```
+
+The simulation varies the correlation between plain distrust and perceived threat in the range [0.4, 0.8] while exploring the parameter space around the N=800 sample size previously identified. Higher correlations between these factors require higher sample sizes. The aforementioned N=800 sample size would likely be adequate up to a correlation of 0.7 between distrust and perceived threat, which is large in the context of effect sizes discussed so far. Presumably not all varieties of distrust will be quite so strongly interrelated, so at least some interesting effects are plausible in that range. 
+
+```{r sim_chinn, cache=T}
+results_chinn <- crossing(
+  b_trust = 0.21, 
+  b_threat = 0.43,
+  r = 1:200, # number of sim replications
+  n = seq(700, 900, by=5), # sample size
+  covar = seq(0.4, 0.8, by=0.1) # covariance trust ~ thread
+) %>% 
+  mutate(success = pmap(., sim_chinn)) %>% 
+  unnest(success)
+```
+
+```{r}
+results_chinn %>% 
+  group_by(n, covar) %>% 
+  dplyr::summarise(p=mean(success)) %>% 
+  ggplot(aes(x=n, y=p,
+             color=factor(covar))) + 
+  stat_smooth(se=F, method=glm,
+              method.args=list(family="binomial"))  + 
+  geom_hline(yintercept=0.8, 
+             color="grey30",
+             linetype="dotted")  +
+  geom_vline(xintercept=800,
+             color="skyblue",
+             linetype="dotted") + 
+  labs(color="Distrust~threat\ncovariance")
+```
+
+# Study 1.3
+
+This study measures cognitive biases in addition to factors such as worldviews, and it includes experimental manipulations (e.g., social influence, which is expected to amplify cognitive biases in paired problem solving tasks). Taken together, these represent a genuine novelty, so once more --- for the reasons laid out by @scheel21 --- it would be premature to run simulations of all of these aspects simultaneously. Instead, the strategy here is to explore these study components in a pairwise fashion, first looking at social influence and cognitive biases, and then looking at worldviews and cognitive biases, both in the context of belief formation. 
+
+## Social influence and cognitive biases
+
+I have previously provided experimental evidence that social influence can amplify cognitive biases associated with false beliefs, even when reliable disconfirming evidence is readily available to participants, and even when they would benefit in monetary terms if they were to make use of that evidence [@sulik21c]. Though nothing in my previous study directly speaks to trust, the bias in question ("Jumping to conclusions", JTC) is relevant for understanding how much participants value a given source of information, and thus, by extension, is informative for "implicit trust" as described in the proposal. 
+
+The effect of social influence on a binary measure of the JTC bias was $b=0.299$ in a logistic regression. These log-odds correspond to a probability of 0.574. The `sim_social_influence` function below simulates this effect (rounded to $p=0.58$) and compares it to chance ($p=0.5$), given sample size `n` and given a certain number of `trials` per subject. Participants will do multiple problem solving tasks during the duration of the study, but it's not the case that all tasks will tap the same sets of cognitive biases. This parameter gives a sense of the minimum number of trials that would need to tap a given cognitive bias, rather than counting all trials in the study. 
+
+```{r mod_social_influence}
+sim_social_influence <- function(n, trials, binomial_p, ...){
+  data <- data.frame(id = rep(1:n, each=trials),
+           social_influence = rep(c(0,1), n*trials)) %>% 
+    left_join(data.frame(id = 1:n,
+                         #by-participant random intercept 
+                         e = rnorm(n, 0, 0.1))) %>% 
+  mutate(p = ifelse(social_influence==0, 0.5, binomial_p)) %>% 
+  mutate(jtc = rbinom(n(), 1, p+e)) 
+  mod <- glmer(jtc~social_influence + (1|id), 
+      data=data,
+      family="binomial")
+  return(coef(summary(mod))[2,4]<0.05)
+}
+```
+
+The simulation code below explores `n` in range [150, 450], and `trials` in {2, 4, 6}. If I recruit 300 participants, I have a reasonable expectation of success (given these assumptions) if at least 2 of the problem solving tasks include a measure of the jumping to conclusions bias. Even though numerous biases are potentially relevant to understanding distrust or disbelief, I would still be able to study multiple such biases if each only needs to be included twice (assuming the others have an effect around this size --- if piloting during WP1 shows that their effect sizes are smaller, I will simply ensure that they appear in more trials). 
+
+```{r run_social_influence, cache=T}
+results_social_influence <- crossing(
+  binomial_p = 0.58, 
+  trials = c(2, 4, 6),
+  r = 1:200, # number of sim replications
+  n = seq(150, 450, by=5), # sample size
+) %>% 
+  mutate(success = pmap(., sim_social_influence)) %>% 
+  unnest(success)
+```
+
+```{r}
+results_social_influence %>% 
+  group_by(n, trials) %>% 
+  summarise(p = mean(success)) %>% 
+  ggplot(aes(x=n, y=p, color=factor(trials))) + 
+  stat_smooth(method=glm,
+              method.args=list(family="binomial"),
+              se=F) + 
+  geom_hline(yintercept=0.8,
+             linetype="dotted",
+             color="grey30") + 
+  geom_vline(xintercept=300,
+             linetype="dotted",
+             color="skyblue") + 
+  labs(color="Trials\nthat include\nthis bias", 
+       y="Proportion successes")
+```
+
+## Worldviews and cognitive biases
+
+The following pivots to examine relationships between belief updating and worldviews. In this case, I base the simulations on effect sizes calculated using open data in @sinclair20. In particular, the following is based on the model at line 183 in their analysis script `sample1_analysis_updated.Rmd` at [https://osf.io/a85rq/](https://osf.io/a85rq/). This model predicts belief accuracy from right wing authoritarianism, subjective confidence, and 'session'. The latter represents a change in time: The study's aim was to track belief accuracy in session 2 after participants were given corrective feedback during session 1. Thus, interactions involving the 'session' variable are informative about belief updating, rather than just belief accuracy at a given time. 
+
+The following adapts code from [https://debruine.github.io/faux/articles/sim_mixed.html](https://debruine.github.io/faux/articles/sim_mixed.html) using the `faux` package [@debruine23]. It uses model parameters output when I attempted to run the code in the above script from Sinclair et al. (though in the interests of transparency: I couldn't replicate their reported effect sizes exactly. Perhaps I did not successfully follow all of their data exclusions, but as the code was dense, I did not attempt to diagnose the source of the problem). In any case, the following parameters are very close to what they report, except in one case where I drop a parameter (a by-subject random slope) which caused a singularity warning, and in another case where I increased the value of a parameter (0.02 for the by-item random intercept) to avoid the singularity warning, as dropping this parameter would mean that errors wouldn't be clustered by item. 
+
+To simulate the worldview variable (right wing authoritariansim `rwa`), I drew random samples from a normal distribution (mean=0, sd=1), as the authors had standardized this predictor. The same strategy would be inappropriate for simulating the belief updating variable (`confidence`), as this variable was binned into 5 bins with most of the mass at the upper end of the range. Instead I calculated the proportion of their data represented by each bin (`confidence_weights` below) and then proportionally sampled responses using those weights.
+
+```{r}
+sim <- function(subj_n, # number of participants
+                item_n, # number of items
+                u0s_sd = 1.3, # random intercept SD for subjects
+                u1s_sd = 0.533, # by-subject random slope for session 
+                #u2s_sd by-subject random slope for confidence
+                #I drop the above which was causing singularity warnings
+                r01s = 0.81, #correlation betw. random effects 
+                u0i_sd = 0.02, # random intercept SD for items 
+                #I increase the above to avoid singularity warnings
+                b0 = 1.955, # intercept
+                b1 = -0.519, # fixed effect of right wing authoritarianism
+                b2 = 0.036, # fixed effect of confidence
+                b3 = -1.369, # fixed effect of session
+                b1b2 = 0.025, # 2-way interaction 
+                b1b2b3 = 0.064, # 3-way interaction
+                sigma_sd = 1, # error SD - Sinclair et al. standardized the variables
+                confidence_weights = c(0.055, 0.074, 0.183, 0.259, 0.429),
+                ...
+        ){
+  data_temp <- add_random(subj=subj_n) %>% 
+    mutate(rwa = rnorm(n(), 0, 1)) %>% 
+    add_random(item=item_n) %>% 
+    add_ranef("subj", u0s=u0s_sd, u1s=u1s_sd, .cors=r01s) %>% 
+    add_ranef("item", u0i=u0i_sd) %>% 
+    add_within("subj", session=c(0, 1)) %>% 
+    add_ranef(sigma = sigma_sd) %>% 
+    mutate(confidence = sample(1:5, n(), replace=T, confidence_weights)) %>% 
+    add_contrast("session", "treatment", colnames = c("session_n")) %>% 
+    mutate(dv = b0 + b1*rwa + b2*confidence + (b3+u1s)*session_n + 
+             b1b2*rwa*confidence + b1b2b3*rwa*confidence*session_n + 
+             u0s + u0i + sigma)
+  mod <- lmer(dv ~ rwa + confidence + session + 
+                rwa:confidence + rwa:confidence:session_n + 
+                (1+session|subj) + (1|item),
+     data=data_temp)
+  broom.mixed::tidy(mod) %>% 
+    filter(effect=="fixed")
+}
+
+
+```
+
+The following simulates a range of sample sizes `n` in [100, 300], and a number of `trials` with values {2, 4, 6} as above. 
+
+```{r sim_lmer, cache=T}
+R <- 200
+power_lmer <- crossing(rep = 1:R,
+                       subj_n = seq(100, 300, by=5),
+                       item_n = seq(2, 6, by=2)) %>% 
+  mutate(analysis = pmap(., sim)) %>%
+  unnest(analysis)
+```
+
+If I use the N=300 estimate from the first simulation above, I would be likely to find effects of similar sizes relating worldview and belief accuracy (coefficient `rwa` below) and relating worldview, confidence and belief updating (coefficient `rwa:confidence:session`). As previously, if I observe smaller effects than this for a given cognitive bias while piloting the actual study, I will simply include more trials that tap that bias. 
+
+```{r}
+power_lmer %>% 
+  mutate(success = p.value < 0.05) %>% 
+  filter(str_detect(term, "^rwa")) %>% 
+  group_by(subj_n, item_n, term) %>% 
+  summarise(p=mean(success)) %>% 
+  ggplot(aes(x=subj_n, color=factor(item_n), y=p)) + 
+  stat_smooth(method=glm,
+              method.args=list(family="binomial"),
+              se=F) + 
+  geom_hline(yintercept=0.8,
+             linetype="dotted",
+             color="grey30") +
+  geom_vline(xintercept=300,
+             linetype="dotted",
+             color="skyblue") +
+  facet_wrap(~term) + 
+  labs(x="n",
+       y="Proportion successes",
+       color="Trials\nthat include\nthis bias")
+  
+```
+
+Between these values and those I report above, I should be able to capture plausible effects across different aspects of this study. 
+
+# References
